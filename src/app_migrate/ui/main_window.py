@@ -216,11 +216,11 @@ class MainWindow(MSFluentWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.app_table.setColumnWidth(1, 70)
         self.app_table.setColumnWidth(2, 90)
         self.app_table.setColumnWidth(3, 112)
-        self.app_table.setColumnWidth(4, 92)
+        self.app_table.setColumnWidth(4, 112)
         self.app_table.setMinimumWidth(520)
         self.app_table.itemSelectionChanged.connect(self._show_current_application_details)
         self.app_table.model().layoutChanged.connect(
@@ -330,12 +330,13 @@ class MainWindow(MSFluentWindow):
         data_header = self.data_table.horizontalHeader()
         data_header.setMinimumSectionSize(70)
         data_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 5):
+        for column in range(1, 4):
             data_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+        data_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.data_table.setColumnWidth(1, 120)
         self.data_table.setColumnWidth(2, 70)
         self.data_table.setColumnWidth(3, 92)
-        self.data_table.setColumnWidth(4, 92)
+        self.data_table.setColumnWidth(4, 112)
         self.data_table.itemSelectionChanged.connect(self._show_current_data_details)
         self.data_table.model().layoutChanged.connect(
             lambda: QTimer.singleShot(0, self._select_first_data_directory)
@@ -606,10 +607,9 @@ class MainWindow(MSFluentWindow):
                 else application.size_bytes
             )
             install_date_item = DateTableWidgetItem(application.install_date)
-            status_item = QTableWidgetItem(
-                language.lang("status_migrated" if link_target else "status_available")
-            )
-            status_item.setIcon((FluentIcon.LINK if link_target else FluentIcon.ACCEPT).icon())
+            status_item = QTableWidgetItem(self._migration_status_text(link_target))
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            status_item.setToolTip(self._migration_status_tooltip(link_target))
             self.app_table.setItem(row, 1, drive_item)
             self.app_table.setItem(row, 2, size_item)
             self.app_table.setItem(row, 3, install_date_item)
@@ -672,10 +672,9 @@ class MainWindow(MSFluentWindow):
             drive_item = QTableWidgetItem(directory.path.drive.upper())
             drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             size_item = SizeTableWidgetItem(directory.size_bytes)
-            status_item = QTableWidgetItem(
-                language.lang("status_migrated" if link_target else "status_available")
-            )
-            status_item.setIcon((FluentIcon.LINK if link_target else FluentIcon.ACCEPT).icon())
+            status_item = QTableWidgetItem(self._migration_status_text(link_target))
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            status_item.setToolTip(self._migration_status_tooltip(link_target))
             self.data_table.setItem(row, 0, name_item)
             self.data_table.setItem(row, 1, type_item)
             self.data_table.setItem(row, 2, drive_item)
@@ -731,6 +730,19 @@ class MainWindow(MSFluentWindow):
             if not icon.isNull():
                 return icon
         return FluentIcon.APPLICATION.icon()
+
+    def _migration_status_text(self, link_target: Path | None) -> str:
+        if link_target is None:
+            return language.lang("status_available")
+        return language.lang(
+            "status_migrated_target",
+            drive=link_target.drive.upper() or language.lang("detail_empty"),
+        )
+
+    def _migration_status_tooltip(self, link_target: Path | None) -> str:
+        if link_target is None:
+            return language.lang("status_available_tooltip")
+        return language.lang("status_migrated_tooltip", target=link_target)
 
     def _show_application_details(
         self,
