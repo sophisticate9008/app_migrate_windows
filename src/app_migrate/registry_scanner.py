@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import winreg
 from dataclasses import replace
+from datetime import date, datetime
 from pathlib import Path
+from time import monotonic
 
 from app_migrate.models import InstalledApplication
 from app_migrate.path_utils import (
@@ -33,7 +35,27 @@ def _query_positive_int(key: winreg.HKEYType, name: str) -> int | None:
         return None
 
 
-def _directory_size(path: Path) -> int | None:
+def _parse_install_date(value: str) -> date | None:
+    normalized = value.strip()
+    for date_format in ("%Y%m%d", "%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(normalized, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _installation_date(key: winreg.HKEYType, path: Path) -> date | None:
+    parsed = _parse_install_date(_query_string(key, "InstallDate"))
+    if parsed is not None:
+        return parsed
+    try:
+        return datetime.fromtimestamp(path.stat().st_ctime).date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _directory_size(path: Path, deadline: float) -> int | None:
     total_bytes = 0
     failed = False
 
@@ -42,12 +64,16 @@ def _directory_size(path: Path) -> int | None:
         failed = True
 
     for root, directory_names, file_names in os.walk(path, followlinks=False, onerror=handle_error):
+        if monotonic() >= deadline:
+            return None
         directory_names[:] = [
             name
             for name in directory_names
             if not (Path(root) / name).is_symlink() and not (Path(root) / name).is_junction()
         ]
         for name in file_names:
+            if monotonic() >= deadline:
+                return None
             try:
                 file_path = Path(root) / name
                 if not file_path.is_symlink():
@@ -105,6 +131,7 @@ def scan_installed_applications() -> list[InstalledApplication]:
                             source_path=path,
                             icon_path=extract_file_path(_query_string(subkey, "DisplayIcon")),
                             size_bytes=estimated_kilobytes * 1024 if estimated_kilobytes else None,
+                            install_date=_installation_date(subkey, path),
                             publisher=_query_string(subkey, "Publisher"),
                             version=_query_string(subkey, "DisplayVersion"),
                             registry_path=f"{root_name}\\{_UNINSTALL_KEY}\\{subkey_name}",
@@ -115,11 +142,14 @@ def scan_installed_applications() -> list[InstalledApplication]:
                         ):
                             applications[key] = application
 
+    size_deadline = monotonic() + 3
     for key, application in tuple(applications.items()):
+        if monotonic() >= size_deadline:
+            break
         if application.size_bytes is None:
             applications[key] = replace(
                 application,
-                size_bytes=_directory_size(application.source_path),
+                size_bytes=_directory_size(application.source_path, size_deadline),
             )
 
     return sorted(applications.values(), key=lambda item: item.name.casefold())

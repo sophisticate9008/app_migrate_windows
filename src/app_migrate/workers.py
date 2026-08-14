@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
@@ -30,8 +31,12 @@ class FunctionWorker(QRunnable):
                 result = self.function(*self.args, progress=self.signals.progress.emit)
             else:
                 result = self.function(*self.args)
-            self.signals.result.emit(result)
         except Exception as error:
-            self.signals.error.emit(str(error))
+            with suppress(RuntimeError):
+                self.signals.error.emit(str(error))
+        else:
+            with suppress(RuntimeError):
+                self.signals.result.emit(result)
         finally:
-            self.signals.finished.emit()
+            with suppress(RuntimeError):
+                self.signals.finished.emit()

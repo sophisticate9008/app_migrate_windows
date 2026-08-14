@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 
@@ -10,6 +11,7 @@ class InstalledApplication:
     source_path: Path
     icon_path: Path | None = None
     size_bytes: int | None = None
+    install_date: date | None = None
     publisher: str = ""
     version: str = ""
     registry_path: str = ""

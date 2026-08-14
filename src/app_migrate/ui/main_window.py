@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QFileInfo, QSize, Qt, QThreadPool
+from PySide6.QtCore import QFileInfo, QSize, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QIcon, QTextOption
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -53,6 +54,10 @@ def _format_size(size: int) -> str:
     return f"{value:.1f} TB"
 
 
+def _format_date(value: date | None) -> str:
+    return value.isoformat() if value else "-"
+
+
 class SizeTableWidgetItem(QTableWidgetItem):
     def __init__(self, size_bytes: int | None) -> None:
         super().__init__(_format_size(size_bytes) if size_bytes is not None else "-")
@@ -62,6 +67,18 @@ class SizeTableWidgetItem(QTableWidgetItem):
         own_size = self.data(Qt.ItemDataRole.UserRole)
         other_size = other.data(Qt.ItemDataRole.UserRole)
         return (-1 if own_size is None else own_size) < (-1 if other_size is None else other_size)
+
+
+class DateTableWidgetItem(QTableWidgetItem):
+    def __init__(self, install_date: date | None) -> None:
+        super().__init__(_format_date(install_date))
+        ordinal = install_date.toordinal() if install_date else None
+        self.setData(Qt.ItemDataRole.UserRole, ordinal)
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        own_date = self.data(Qt.ItemDataRole.UserRole)
+        other_date = other.data(Qt.ItemDataRole.UserRole)
+        return (-1 if own_date is None else own_date) < (-1 if other_date is None else other_date)
 
 
 def _batch_migrate(
@@ -85,11 +102,13 @@ class MainWindow(MSFluentWindow):
         self.setWindowIcon(QIcon(str(resource_path("icons/app-migrate.ico"))))
         self.resize(1180, 760)
         self.setMinimumSize(940, 620)
-        self._thread_pool = QThreadPool.globalInstance()
+        self._thread_pool = QThreadPool(self)
+        self._thread_pool.setMaxThreadCount(2)
         self._applications: list[InstalledApplication] = []
         self._icon_provider = QFileIconProvider()
         self._active_workers: set[FunctionWorker] = set()
         self._build_ui()
+        QTimer.singleShot(0, self._scan_registry)
 
     def _build_ui(self) -> None:
         applications_page = self._build_applications_page()
@@ -144,7 +163,7 @@ class MainWindow(MSFluentWindow):
             [
                 language.lang("application"),
                 language.lang("application_size"),
-                language.lang("source_directory"),
+                language.lang("install_date"),
             ]
         )
         self.app_table.setAlternatingRowColors(True)
@@ -158,11 +177,11 @@ class MainWindow(MSFluentWindow):
         self.app_table.verticalHeader().setDefaultSectionSize(40)
         header = self.app_table.horizontalHeader()
         header.setMinimumSectionSize(70)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.app_table.setColumnWidth(0, 205)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         self.app_table.setColumnWidth(1, 90)
+        self.app_table.setColumnWidth(2, 112)
         self.app_table.setMinimumWidth(520)
         self.app_table.currentCellChanged.connect(self._show_application_details)
         right_layout.addWidget(self.app_table, 1)
@@ -206,11 +225,11 @@ class MainWindow(MSFluentWindow):
         panel.setMinimumWidth(220)
         panel.setMaximumWidth(320)
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 18, 18, 18)
-        panel_layout.setSpacing(7)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(5)
 
         self.detail_icon = QLabel()
-        self.detail_icon.setFixedSize(52, 52)
+        self.detail_icon.setFixedSize(46, 46)
         self.detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detail_name = SubtitleLabel(language.lang("detail_select_prompt"))
         self.detail_name.setWordWrap(True)
@@ -219,11 +238,12 @@ class MainWindow(MSFluentWindow):
 
         self.detail_values: dict[str, BodyLabel | TextEdit] = {}
         for label_key, value_key, text_height in (
-            ("source_directory", "source", 58),
+            ("source_directory", "source", 52),
             ("application_size", "size", 0),
+            ("install_date", "install_date", 0),
             ("version", "version", 0),
             ("publisher", "publisher", 0),
-            ("registry_location", "registry", 88),
+            ("registry_location", "registry", 72),
         ):
             panel_layout.addSpacing(4)
             panel_layout.addWidget(CaptionLabel(language.lang(label_key)))
@@ -333,11 +353,17 @@ class MainWindow(MSFluentWindow):
 
     def _scan_registry(self) -> None:
         self._set_busy(True, "status_scanning")
-        worker = FunctionWorker(scan_installed_applications)
-        worker.signals.result.connect(self._populate_applications)
-        worker.signals.error.connect(self._show_error)
-        worker.signals.finished.connect(lambda: self._finish_worker(worker))
-        self._start_worker(worker)
+        QTimer.singleShot(0, self._perform_registry_scan)
+
+    def _perform_registry_scan(self) -> None:
+        try:
+            applications = scan_installed_applications()
+        except Exception as error:
+            self._show_error(str(error))
+            self._set_busy(False)
+            return
+        self._set_busy(False)
+        self._populate_applications(applications)
 
     def _populate_applications(self, applications: object) -> None:
         self._applications = list(applications)  # type: ignore[arg-type]
@@ -351,10 +377,9 @@ class MainWindow(MSFluentWindow):
             name_item.setData(Qt.ItemDataRole.UserRole, application)
             self.app_table.setItem(row, 0, name_item)
             size_item = SizeTableWidgetItem(application.size_bytes)
-            source_item = QTableWidgetItem(str(application.source_path))
-            source_item.setToolTip(str(application.source_path))
+            install_date_item = DateTableWidgetItem(application.install_date)
             self.app_table.setItem(row, 1, size_item)
-            self.app_table.setItem(row, 2, source_item)
+            self.app_table.setItem(row, 2, install_date_item)
         self.app_table.setSortingEnabled(True)
         self.app_table.sortItems(0, Qt.SortOrder.AscendingOrder)
         if self._applications:
@@ -388,7 +413,7 @@ class MainWindow(MSFluentWindow):
             self._clear_application_details()
             return
         icon = self._application_icon(application)
-        self.detail_icon.setPixmap(icon.pixmap(48, 48))
+        self.detail_icon.setPixmap(icon.pixmap(42, 42))
         self.detail_name.setText(application.name)
         self.detail_values["source"].setText(str(application.source_path))
         self.detail_values["size"].setText(
@@ -396,6 +421,7 @@ class MainWindow(MSFluentWindow):
             if application.size_bytes is not None
             else language.lang("detail_empty")
         )
+        self.detail_values["install_date"].setText(_format_date(application.install_date))
         self.detail_values["version"].setText(application.version or language.lang("detail_empty"))
         self.detail_values["publisher"].setText(
             application.publisher or language.lang("detail_empty")
