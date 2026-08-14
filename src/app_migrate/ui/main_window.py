@@ -46,9 +46,22 @@ def _format_size(size: int) -> str:
     value = float(size)
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if value < 1024 or unit == "TB":
+            if unit == "B" or value >= 100:
+                return f"{value:.0f} {unit}"
             return f"{value:.1f} {unit}"
         value /= 1024
     return f"{value:.1f} TB"
+
+
+class SizeTableWidgetItem(QTableWidgetItem):
+    def __init__(self, size_bytes: int | None) -> None:
+        super().__init__(_format_size(size_bytes) if size_bytes is not None else "-")
+        self.setData(Qt.ItemDataRole.UserRole, size_bytes)
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        own_size = self.data(Qt.ItemDataRole.UserRole)
+        other_size = other.data(Qt.ItemDataRole.UserRole)
+        return (-1 if own_size is None else own_size) < (-1 if other_size is None else other_size)
 
 
 def _batch_migrate(
@@ -126,12 +139,11 @@ class MainWindow(MSFluentWindow):
         right_layout.setSpacing(12)
 
         self.app_table = TableWidget(right_panel)
-        self.app_table.setColumnCount(4)
+        self.app_table.setColumnCount(3)
         self.app_table.setHorizontalHeaderLabels(
             [
                 language.lang("application"),
-                language.lang("publisher"),
-                language.lang("version"),
+                language.lang("application_size"),
                 language.lang("source_directory"),
             ]
         )
@@ -148,11 +160,9 @@ class MainWindow(MSFluentWindow):
         header.setMinimumSectionSize(70)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.app_table.setColumnWidth(0, 165)
-        self.app_table.setColumnWidth(1, 105)
-        self.app_table.setColumnWidth(2, 82)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.app_table.setColumnWidth(0, 205)
+        self.app_table.setColumnWidth(1, 90)
         self.app_table.setMinimumWidth(520)
         self.app_table.currentCellChanged.connect(self._show_application_details)
         right_layout.addWidget(self.app_table, 1)
@@ -210,6 +220,7 @@ class MainWindow(MSFluentWindow):
         self.detail_values: dict[str, BodyLabel | TextEdit] = {}
         for label_key, value_key, text_height in (
             ("source_directory", "source", 58),
+            ("application_size", "size", 0),
             ("version", "version", 0),
             ("publisher", "publisher", 0),
             ("registry_location", "registry", 88),
@@ -330,20 +341,22 @@ class MainWindow(MSFluentWindow):
 
     def _populate_applications(self, applications: object) -> None:
         self._applications = list(applications)  # type: ignore[arg-type]
+        self.app_table.setSortingEnabled(False)
         self.app_table.setRowCount(len(self._applications))
         for row, application in enumerate(self._applications):
             name_item = QTableWidgetItem(application.name)
             name_item.setIcon(self._application_icon(application))
             name_item.setCheckState(Qt.CheckState.Unchecked)
             name_item.setToolTip(application.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, application)
             self.app_table.setItem(row, 0, name_item)
-            publisher_item = QTableWidgetItem(application.publisher)
-            version_item = QTableWidgetItem(application.version)
+            size_item = SizeTableWidgetItem(application.size_bytes)
             source_item = QTableWidgetItem(str(application.source_path))
             source_item.setToolTip(str(application.source_path))
-            self.app_table.setItem(row, 1, publisher_item)
-            self.app_table.setItem(row, 2, version_item)
-            self.app_table.setItem(row, 3, source_item)
+            self.app_table.setItem(row, 1, size_item)
+            self.app_table.setItem(row, 2, source_item)
+        self.app_table.setSortingEnabled(True)
+        self.app_table.sortItems(0, Qt.SortOrder.AscendingOrder)
         if self._applications:
             self.app_table.setCurrentCell(0, 0)
         else:
@@ -367,14 +380,22 @@ class MainWindow(MSFluentWindow):
         _previous_row: int,
         _previous_column: int,
     ) -> None:
-        if current_row < 0 or current_row >= len(self._applications):
+        if current_row < 0 or current_row >= self.app_table.rowCount():
             self._clear_application_details()
             return
-        application = self._applications[current_row]
+        application = self.app_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+        if not isinstance(application, InstalledApplication):
+            self._clear_application_details()
+            return
         icon = self._application_icon(application)
         self.detail_icon.setPixmap(icon.pixmap(48, 48))
         self.detail_name.setText(application.name)
         self.detail_values["source"].setText(str(application.source_path))
+        self.detail_values["size"].setText(
+            _format_size(application.size_bytes)
+            if application.size_bytes is not None
+            else language.lang("detail_empty")
+        )
         self.detail_values["version"].setText(application.version or language.lang("detail_empty"))
         self.detail_values["publisher"].setText(
             application.publisher or language.lang("detail_empty")
@@ -397,8 +418,8 @@ class MainWindow(MSFluentWindow):
 
     def _migrate_selected(self) -> None:
         selected = [
-            application
-            for row, application in enumerate(self._applications)
+            self.app_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.app_table.rowCount())
             if self.app_table.item(row, 0).checkState() == Qt.CheckState.Checked
         ]
         if not selected:
