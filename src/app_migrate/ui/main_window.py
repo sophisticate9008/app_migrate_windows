@@ -36,10 +36,18 @@ from qfluentwidgets import (
     TextEdit,
 )
 
-from app_migrate.application_directories import application_migration_requests
+from app_migrate.application_directories import (
+    data_migration_request,
+    program_migration_request,
+)
 from app_migrate.language import language
 from app_migrate.migration import migrate_directory
-from app_migrate.models import InstalledApplication, MigrationRequest, MigrationResult
+from app_migrate.models import (
+    ApplicationDirectory,
+    InstalledApplication,
+    MigrationRequest,
+    MigrationResult,
+)
 from app_migrate.registry_scanner import scan_installed_applications
 from app_migrate.resources import resource_path
 from app_migrate.workers import FunctionWorker
@@ -115,10 +123,12 @@ class MainWindow(MSFluentWindow):
 
     def _build_ui(self) -> None:
         applications_page = self._build_applications_page()
+        data_page = self._build_data_page()
         custom_page = self._build_custom_page()
         self.addSubInterface(
             applications_page, FluentIcon.APPLICATION, language.lang("tab_applications")
         )
+        self.addSubInterface(data_page, FluentIcon.FOLDER, language.lang("tab_data"))
         self.addSubInterface(custom_page, FluentIcon.LINK, language.lang("tab_custom"))
 
     def _page_header(self, title_key: str, description_key: str) -> QVBoxLayout:
@@ -243,6 +253,121 @@ class MainWindow(MSFluentWindow):
         layout.addWidget(content_splitter, 1)
         return page
 
+    def _build_data_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("dataPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(30, 26, 30, 24)
+        layout.setSpacing(18)
+
+        header = QVBoxLayout()
+        header.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(16)
+        title_row.addWidget(SubtitleLabel(language.lang("tab_data")))
+        self.data_search = SearchLineEdit()
+        self.data_search.setPlaceholderText(language.lang("search_data"))
+        self.data_search.setClearButtonEnabled(True)
+        self.data_search.setFixedWidth(280)
+        self.data_search.textChanged.connect(self._filter_data_directories)
+        title_row.addWidget(self.data_search)
+        title_row.addStretch(1)
+        header.addLayout(title_row)
+        description = BodyLabel(language.lang("data_description"))
+        description.setWordWrap(True)
+        header.addWidget(description)
+        layout.addLayout(header)
+
+        toolbar = QHBoxLayout()
+        self.data_scan_button = self._button("scan_registry", FluentIcon.SYNC, self._scan_registry)
+        self.data_select_all_button = self._button(
+            "select_all", FluentIcon.ACCEPT, self._select_all_data
+        )
+        self.data_clear_button = self._button(
+            "clear_selection", FluentIcon.CANCEL, self._clear_data_selection
+        )
+        toolbar.addWidget(self.data_scan_button)
+        toolbar.addWidget(self.data_select_all_button)
+        toolbar.addWidget(self.data_clear_button)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.addWidget(self._build_data_details())
+
+        right_panel = QWidget()
+        right_panel.setMinimumWidth(520)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(6, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        self.data_table = TableWidget(right_panel)
+        self.data_table.setColumnCount(4)
+        self.data_table.setHorizontalHeaderLabels(
+            [
+                language.lang("application"),
+                language.lang("data_type"),
+                language.lang("application_drive"),
+                language.lang("application_size"),
+            ]
+        )
+        self.data_table.setAlternatingRowColors(True)
+        self.data_table.setWordWrap(False)
+        self.data_table.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.data_table.setIconSize(QSize(28, 28))
+        self.data_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.data_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.data_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.data_table.verticalHeader().hide()
+        self.data_table.verticalHeader().setDefaultSectionSize(40)
+        data_header = self.data_table.horizontalHeader()
+        data_header.setMinimumSectionSize(70)
+        data_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 4):
+            data_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+        self.data_table.setColumnWidth(1, 120)
+        self.data_table.setColumnWidth(2, 70)
+        self.data_table.setColumnWidth(3, 92)
+        self.data_table.itemSelectionChanged.connect(self._show_current_data_details)
+        self.data_table.model().layoutChanged.connect(
+            lambda: QTimer.singleShot(0, self._select_first_data_directory)
+        )
+        right_layout.addWidget(self.data_table, 1)
+
+        destination_layout, self.data_destination, _ = self._path_field(
+            "destination_base", "choose_destination", self._browse_data_destination
+        )
+        self.data_destination.setText(self._restore_path("paths/data_destination"))
+        self.data_destination.editingFinished.connect(
+            lambda: self._remember_path("paths/data_destination", self.data_destination.text())
+        )
+        right_layout.addLayout(destination_layout)
+
+        action_layout = QHBoxLayout()
+        self.data_status = CaptionLabel(language.lang("status_ready"))
+        self.data_progress = ProgressBar()
+        self.data_progress.setFixedWidth(150)
+        self.data_progress.hide()
+        action_layout.addWidget(self.data_status)
+        action_layout.addWidget(self.data_progress)
+        action_layout.addStretch(1)
+        self.data_migrate_button = self._button(
+            "migrate_selected_data",
+            FluentIcon.SEND,
+            self._migrate_selected_data,
+            accent=True,
+        )
+        action_layout.addWidget(self.data_migrate_button)
+        right_layout.addLayout(action_layout)
+
+        content_splitter.addWidget(right_panel)
+        content_splitter.setStretchFactor(0, 0)
+        content_splitter.setStretchFactor(1, 1)
+        content_splitter.setSizes([250, 760])
+        layout.addWidget(content_splitter, 1)
+        return page
+
     def _build_application_details(self) -> QWidget:
         panel = SimpleCardWidget()
         panel.setMinimumWidth(220)
@@ -261,7 +386,7 @@ class MainWindow(MSFluentWindow):
 
         self.detail_values: dict[str, BodyLabel | TextEdit] = {}
         for label_key, value_key, text_height in (
-            ("related_directories", "source", 116),
+            ("source_directory", "source", 68),
             ("application_size", "size", 0),
             ("install_date", "install_date", 0),
             ("version", "version", 0),
@@ -281,6 +406,46 @@ class MainWindow(MSFluentWindow):
                 value_label.setWordWrap(True)
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.detail_values[value_key] = value_label
+            panel_layout.addWidget(value_label)
+        panel_layout.addStretch(1)
+        return panel
+
+    def _build_data_details(self) -> QWidget:
+        panel = SimpleCardWidget()
+        panel.setMinimumWidth(220)
+        panel.setMaximumWidth(320)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(6)
+
+        self.data_detail_icon = QLabel()
+        self.data_detail_icon.setFixedSize(46, 46)
+        self.data_detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.data_detail_name = SubtitleLabel(language.lang("detail_select_data_prompt"))
+        self.data_detail_name.setWordWrap(True)
+        panel_layout.addWidget(self.data_detail_icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        panel_layout.addWidget(self.data_detail_name)
+
+        self.data_detail_values: dict[str, BodyLabel | TextEdit] = {}
+        for label_key, value_key, text_height in (
+            ("data_type", "type", 0),
+            ("source_directory", "source", 108),
+            ("application_size", "size", 0),
+            ("publisher", "publisher", 0),
+        ):
+            panel_layout.addSpacing(5)
+            panel_layout.addWidget(CaptionLabel(language.lang(label_key)))
+            if text_height:
+                value_label = TextEdit()
+                value_label.setReadOnly(True)
+                value_label.setFixedHeight(text_height)
+                value_label.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+                value_label.setText(language.lang("detail_empty"))
+            else:
+                value_label = BodyLabel(language.lang("detail_empty"))
+                value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.data_detail_values[value_key] = value_label
             panel_layout.addWidget(value_label)
         panel_layout.addStretch(1)
         return panel
@@ -378,6 +543,11 @@ class MainWindow(MSFluentWindow):
             "choose_destination", self.app_destination, "paths/application_destination"
         )
 
+    def _browse_data_destination(self) -> None:
+        self._choose_directory(
+            "choose_destination", self.data_destination, "paths/data_destination"
+        )
+
     def _browse_custom_source(self) -> None:
         self._choose_directory("choose_source", self.custom_source)
 
@@ -402,6 +572,7 @@ class MainWindow(MSFluentWindow):
 
     def _populate_applications(self, applications: object) -> None:
         self._applications = list(applications)  # type: ignore[arg-type]
+        self._populate_data_directories()
         self.app_table.setSortingEnabled(False)
         self.app_table.setRowCount(len(self._applications))
         for row, application in enumerate(self._applications):
@@ -411,10 +582,13 @@ class MainWindow(MSFluentWindow):
             name_item.setToolTip(application.name)
             name_item.setData(Qt.ItemDataRole.UserRole, application)
             self.app_table.setItem(row, 0, name_item)
-            drives = sorted({directory.path.drive.upper() for directory in application.directories})
-            drive_item = QTableWidgetItem(" / ".join(drives))
+            drive_item = QTableWidgetItem(application.source_path.drive.upper())
             drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            size_item = SizeTableWidgetItem(application.size_bytes)
+            size_item = SizeTableWidgetItem(
+                application.primary_size_bytes
+                if application.primary_size_bytes is not None
+                else application.size_bytes
+            )
             install_date_item = DateTableWidgetItem(application.install_date)
             self.app_table.setItem(row, 1, drive_item)
             self.app_table.setItem(row, 2, size_item)
@@ -446,7 +620,7 @@ class MainWindow(MSFluentWindow):
             self._show_current_application_details()
 
         if query:
-            self._set_status(
+            self._set_app_status(
                 language.lang(
                     "status_filtered",
                     visible=visible_count,
@@ -454,7 +628,70 @@ class MainWindow(MSFluentWindow):
                 )
             )
         else:
-            self._set_status(language.lang("status_found", count=self.app_table.rowCount()))
+            self._set_app_status(language.lang("status_found", count=self.app_table.rowCount()))
+
+    def _populate_data_directories(self) -> None:
+        entries = [
+            (application, directory)
+            for application in self._applications
+            for directory in application.related_directories
+        ]
+        self.data_table.setSortingEnabled(False)
+        self.data_table.setRowCount(len(entries))
+        for row, (application, directory) in enumerate(entries):
+            name_item = QTableWidgetItem(application.name)
+            name_item.setIcon(self._application_icon(application))
+            name_item.setCheckState(Qt.CheckState.Unchecked)
+            name_item.setToolTip(application.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, (application, directory))
+            type_item = QTableWidgetItem(language.lang(f"directory_role_{directory.role}"))
+            drive_item = QTableWidgetItem(directory.path.drive.upper())
+            drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            size_item = SizeTableWidgetItem(directory.size_bytes)
+            self.data_table.setItem(row, 0, name_item)
+            self.data_table.setItem(row, 1, type_item)
+            self.data_table.setItem(row, 2, drive_item)
+            self.data_table.setItem(row, 3, size_item)
+        self.data_table.setSortingEnabled(True)
+        self.data_table.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self._filter_data_directories(self.data_search.text())
+
+    def _filter_data_directories(self, search_text: str) -> None:
+        query = search_text.strip().casefold()
+        visible_count = 0
+        first_visible_row = -1
+        for row in range(self.data_table.rowCount()):
+            data = self.data_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            application, directory = data
+            searchable = f"{application.name}\n{directory.path}".casefold()
+            is_visible = not query or query in searchable
+            self.data_table.setRowHidden(row, not is_visible)
+            if is_visible:
+                visible_count += 1
+                if first_visible_row < 0:
+                    first_visible_row = row
+
+        current_row = self.data_table.currentRow()
+        if first_visible_row < 0:
+            self.data_table.clearSelection()
+            self._clear_data_details()
+        elif current_row < 0 or self.data_table.isRowHidden(current_row):
+            self.data_table.setCurrentCell(first_visible_row, 0)
+            self.data_table.selectRow(first_visible_row)
+            self._show_current_data_details()
+
+        if query:
+            self._set_data_status(
+                language.lang(
+                    "status_data_filtered",
+                    visible=visible_count,
+                    total=self.data_table.rowCount(),
+                )
+            )
+        else:
+            self._set_data_status(
+                language.lang("status_data_found", count=self.data_table.rowCount())
+            )
 
     def _application_icon(self, application: InstalledApplication) -> QIcon:
         if application.icon_path:
@@ -483,14 +720,10 @@ class MainWindow(MSFluentWindow):
         icon = self._application_icon(application)
         self.detail_icon.setPixmap(icon.pixmap(42, 42))
         self.detail_name.setText(application.name)
-        directory_lines = [
-            f"{language.lang(f'directory_role_{directory.role}')}\n{directory.path}"
-            for directory in application.directories
-        ]
-        self.detail_values["source"].setText("\n\n".join(directory_lines))
+        self.detail_values["source"].setText(str(application.source_path))
         self.detail_values["size"].setText(
-            _format_size(application.size_bytes)
-            if application.size_bytes is not None
+            _format_size(application.primary_size_bytes)
+            if application.primary_size_bytes is not None
             else language.lang("detail_empty")
         )
         self.detail_values["install_date"].setText(_format_date(application.install_date))
@@ -525,6 +758,56 @@ class MainWindow(MSFluentWindow):
         for value_label in self.detail_values.values():
             value_label.setText(language.lang("detail_empty"))
 
+    def _show_current_data_details(self) -> None:
+        current_row = self.data_table.currentRow()
+        if current_row < 0:
+            self._clear_data_details()
+            return
+        data = self.data_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+        if not isinstance(data, tuple) or len(data) != 2:
+            self._clear_data_details()
+            return
+        application, directory = data
+        if not isinstance(application, InstalledApplication) or not isinstance(
+            directory, ApplicationDirectory
+        ):
+            self._clear_data_details()
+            return
+        self.data_detail_icon.setPixmap(self._application_icon(application).pixmap(42, 42))
+        self.data_detail_name.setText(application.name)
+        self.data_detail_values["type"].setText(language.lang(f"directory_role_{directory.role}"))
+        self.data_detail_values["source"].setText(str(directory.path))
+        self.data_detail_values["size"].setText(
+            _format_size(directory.size_bytes)
+            if directory.size_bytes is not None
+            else language.lang("detail_empty")
+        )
+        self.data_detail_values["publisher"].setText(
+            application.publisher or language.lang("detail_empty")
+        )
+
+    def _select_first_data_directory(self) -> None:
+        first_visible_row = next(
+            (
+                row
+                for row in range(self.data_table.rowCount())
+                if not self.data_table.isRowHidden(row)
+            ),
+            -1,
+        )
+        if first_visible_row < 0:
+            self._clear_data_details()
+            return
+        self.data_table.setCurrentCell(first_visible_row, 0)
+        self.data_table.selectRow(first_visible_row)
+        self._show_current_data_details()
+
+    def _clear_data_details(self) -> None:
+        self.data_detail_icon.clear()
+        self.data_detail_name.setText(language.lang("detail_select_data_prompt"))
+        for value_label in self.data_detail_values.values():
+            value_label.setText(language.lang("detail_empty"))
+
     def _select_all(self) -> None:
         for row in range(self.app_table.rowCount()):
             self.app_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
@@ -532,6 +815,15 @@ class MainWindow(MSFluentWindow):
     def _clear_selection(self) -> None:
         for row in range(self.app_table.rowCount()):
             self.app_table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
+
+    def _select_all_data(self) -> None:
+        for row in range(self.data_table.rowCount()):
+            if not self.data_table.isRowHidden(row):
+                self.data_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+
+    def _clear_data_selection(self) -> None:
+        for row in range(self.data_table.rowCount()):
+            self.data_table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
 
     def _migrate_selected(self) -> None:
         selected = [
@@ -546,14 +838,32 @@ class MainWindow(MSFluentWindow):
         if not destination.is_dir():
             self._notify_warning(language.lang("missing_destination"))
             return
-        requests = [
-            request
-            for application in selected
-            for request in application_migration_requests(application, destination)
-        ]
+        requests = [program_migration_request(application, destination) for application in selected]
         if not self._confirm(len(requests)):
             return
         self._remember_path("paths/application_destination", str(destination))
+        self._start_migration(requests)
+
+    def _migrate_selected_data(self) -> None:
+        selected = [
+            self.data_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.data_table.rowCount())
+            if self.data_table.item(row, 0).checkState() == Qt.CheckState.Checked
+        ]
+        if not selected:
+            self._notify_warning(language.lang("select_data_directory"))
+            return
+        destination = Path(self.data_destination.text().strip())
+        if not destination.is_dir():
+            self._notify_warning(language.lang("missing_destination"))
+            return
+        requests = [
+            data_migration_request(application, directory, destination)
+            for application, directory in selected
+        ]
+        if not self._confirm(len(requests)):
+            return
+        self._remember_path("paths/data_destination", str(destination))
         self._start_migration(requests)
 
     def _migrate_custom(self) -> None:
@@ -653,13 +963,22 @@ class MainWindow(MSFluentWindow):
 
     def _set_status(self, text: str) -> None:
         self.app_status.setText(text)
+        self.data_status.setText(text)
         self.custom_status.setText(text)
+
+    def _set_app_status(self, text: str) -> None:
+        self.app_status.setText(text)
+
+    def _set_data_status(self, text: str) -> None:
+        self.data_status.setText(text)
 
     def _set_busy(self, busy: bool, status_key: str = "status_ready") -> None:
         self.scan_button.setEnabled(not busy)
+        self.data_scan_button.setEnabled(not busy)
         self.app_migrate_button.setEnabled(not busy)
+        self.data_migrate_button.setEnabled(not busy)
         self.custom_migrate_button.setEnabled(not busy)
-        for progress_bar in (self.app_progress, self.custom_progress):
+        for progress_bar in (self.app_progress, self.data_progress, self.custom_progress):
             progress_bar.setRange(0, 0 if busy else 100)
             progress_bar.setVisible(busy)
         self._set_status(language.lang(status_key))

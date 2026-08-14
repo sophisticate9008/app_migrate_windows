@@ -6,7 +6,10 @@ from pathlib import Path
 from shutil import copytree
 from unittest.mock import patch
 
-from app_migrate.application_directories import application_migration_requests
+from app_migrate.application_directories import (
+    application_migration_requests,
+    program_migration_request,
+)
 from app_migrate.migration import (
     MigrationError,
     _create_junction,
@@ -67,8 +70,21 @@ class MigrationTests(unittest.TestCase):
         requests = application_migration_requests(application, Path(r"D:\02.app"))
 
         self.assertEqual(len(requests), 2)
-        self.assertEqual(requests[0].destination_relative, Path(r"Chrome\Application"))
+        self.assertEqual(
+            requests[0].destination_relative,
+            Path(r"Program Files\Google\Chrome"),
+        )
         self.assertEqual(requests[1].destination_relative, Path(r"Chrome\UserData"))
+
+    def test_program_migration_preserves_source_directory_structure(self) -> None:
+        application = InstalledApplication(
+            name="Example",
+            source_path=Path(r"C:\11\22"),
+        )
+
+        request = program_migration_request(application, Path(r"D:\migrate"))
+
+        self.assertEqual(request.destination_relative, Path(r"11\22"))
 
     def test_validate_rejects_destination_on_same_drive(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

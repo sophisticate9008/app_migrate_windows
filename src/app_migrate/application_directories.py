@@ -96,16 +96,40 @@ def application_migration_requests(
     application: InstalledApplication,
     destination_base: Path,
 ) -> list[MigrationRequest]:
-    directories = application.directories
-    if len(directories) == 1:
-        return [MigrationRequest(application.source_path, destination_base)]
+    requests = [program_migration_request(application, destination_base)]
+    requests.extend(
+        data_migration_request(application, directory, destination_base)
+        for directory in application.related_directories
+    )
+    return requests
 
+
+def program_migration_request(
+    application: InstalledApplication,
+    destination_base: Path,
+) -> MigrationRequest:
+    source = application.source_path
+    try:
+        relative_source = source.relative_to(source.anchor)
+    except ValueError:
+        relative_source = Path(source.name)
+    return MigrationRequest(
+        source=source,
+        destination_base=destination_base,
+        destination_relative=Path(
+            *(safe_component(component) for component in relative_source.parts)
+        ),
+    )
+
+
+def data_migration_request(
+    application: InstalledApplication,
+    directory: ApplicationDirectory,
+    destination_base: Path,
+) -> MigrationRequest:
     storage_name = safe_component(application.storage_name or application.source_path.name)
-    return [
-        MigrationRequest(
-            source=directory.path,
-            destination_base=destination_base,
-            destination_relative=Path(storage_name) / safe_component(directory.destination_name),
-        )
-        for directory in directories
-    ]
+    return MigrationRequest(
+        source=directory.path,
+        destination_base=destination_base,
+        destination_relative=Path(storage_name) / safe_component(directory.destination_name),
+    )
