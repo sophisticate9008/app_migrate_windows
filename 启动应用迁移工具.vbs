@@ -2,12 +2,14 @@ Option Explicit
 
 Dim fileSystem
 Dim shell
+Dim shellApplication
 Dim projectRoot
 Dim applicationPath
 Dim syncExitCode
 
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
+Set shellApplication = CreateObject("Shell.Application")
 
 projectRoot = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 applicationPath = fileSystem.BuildPath(projectRoot, ".venv\Scripts\app-migrate.exe")
@@ -23,4 +25,4 @@ If Not fileSystem.FileExists(applicationPath) Then
     End If
 End If
 
-shell.Run Chr(34) & applicationPath & Chr(34), 1, False
+shellApplication.ShellExecute applicationPath, "", projectRoot, "runas", 1

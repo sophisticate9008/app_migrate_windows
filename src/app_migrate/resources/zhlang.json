@@ -1,5 +1,7 @@
 {
   "app_name": "应用目录迁移工具",
+  "admin_required_title": "需要管理员权限",
+  "admin_elevation_failed": "未能取得管理员权限，程序无法执行目录迁移。请在用户账户控制窗口中允许此应用运行。",
   "tab_applications": "应用迁移",
   "tab_custom": "自定义链接",
   "applications_description": "扫描 Windows 注册表中的应用安装目录，选择后迁移到其他磁盘。",
