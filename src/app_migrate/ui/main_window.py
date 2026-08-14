@@ -49,6 +49,7 @@ from app_migrate.models import (
     MigrationRequest,
     MigrationResult,
 )
+from app_migrate.path_utils import directory_link_target
 from app_migrate.process_scanner import find_running_application_processes
 from app_migrate.registry_scanner import scan_installed_applications
 from app_migrate.resources import resource_path
@@ -190,13 +191,14 @@ class MainWindow(MSFluentWindow):
         right_layout.setSpacing(12)
 
         self.app_table = TableWidget(right_panel)
-        self.app_table.setColumnCount(4)
+        self.app_table.setColumnCount(5)
         self.app_table.setHorizontalHeaderLabels(
             [
                 language.lang("application"),
                 language.lang("application_drive"),
                 language.lang("application_size"),
                 language.lang("install_date"),
+                language.lang("migration_status"),
             ]
         )
         self.app_table.setAlternatingRowColors(True)
@@ -214,9 +216,11 @@ class MainWindow(MSFluentWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         self.app_table.setColumnWidth(1, 70)
         self.app_table.setColumnWidth(2, 90)
         self.app_table.setColumnWidth(3, 112)
+        self.app_table.setColumnWidth(4, 92)
         self.app_table.setMinimumWidth(520)
         self.app_table.itemSelectionChanged.connect(self._show_current_application_details)
         self.app_table.model().layoutChanged.connect(
@@ -304,13 +308,14 @@ class MainWindow(MSFluentWindow):
         right_layout.setSpacing(12)
 
         self.data_table = TableWidget(right_panel)
-        self.data_table.setColumnCount(4)
+        self.data_table.setColumnCount(5)
         self.data_table.setHorizontalHeaderLabels(
             [
                 language.lang("application"),
                 language.lang("data_type"),
                 language.lang("application_drive"),
                 language.lang("application_size"),
+                language.lang("migration_status"),
             ]
         )
         self.data_table.setAlternatingRowColors(True)
@@ -325,11 +330,12 @@ class MainWindow(MSFluentWindow):
         data_header = self.data_table.horizontalHeader()
         data_header.setMinimumSectionSize(70)
         data_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 4):
+        for column in range(1, 5):
             data_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
         self.data_table.setColumnWidth(1, 120)
         self.data_table.setColumnWidth(2, 70)
         self.data_table.setColumnWidth(3, 92)
+        self.data_table.setColumnWidth(4, 92)
         self.data_table.itemSelectionChanged.connect(self._show_current_data_details)
         self.data_table.model().layoutChanged.connect(
             lambda: QTimer.singleShot(0, self._select_first_data_directory)
@@ -387,6 +393,7 @@ class MainWindow(MSFluentWindow):
         self.detail_values: dict[str, BodyLabel | TextEdit] = {}
         for label_key, value_key, text_height in (
             ("source_directory", "source", 68),
+            ("link_target", "link_target", 68),
             ("application_size", "size", 0),
             ("install_date", "install_date", 0),
             ("version", "version", 0),
@@ -430,6 +437,7 @@ class MainWindow(MSFluentWindow):
         for label_key, value_key, text_height in (
             ("data_type", "type", 0),
             ("source_directory", "source", 108),
+            ("link_target", "link_target", 78),
             ("application_size", "size", 0),
             ("publisher", "publisher", 0),
         ):
@@ -586,6 +594,9 @@ class MainWindow(MSFluentWindow):
             name_item.setCheckState(Qt.CheckState.Unchecked)
             name_item.setToolTip(application.name)
             name_item.setData(Qt.ItemDataRole.UserRole, application)
+            link_target = directory_link_target(application.source_path)
+            if link_target is not None:
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             self.app_table.setItem(row, 0, name_item)
             drive_item = QTableWidgetItem(application.source_path.drive.upper())
             drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -595,9 +606,14 @@ class MainWindow(MSFluentWindow):
                 else application.size_bytes
             )
             install_date_item = DateTableWidgetItem(application.install_date)
+            status_item = QTableWidgetItem(
+                language.lang("status_migrated" if link_target else "status_available")
+            )
+            status_item.setIcon((FluentIcon.LINK if link_target else FluentIcon.ACCEPT).icon())
             self.app_table.setItem(row, 1, drive_item)
             self.app_table.setItem(row, 2, size_item)
             self.app_table.setItem(row, 3, install_date_item)
+            self.app_table.setItem(row, 4, status_item)
         self.app_table.setSortingEnabled(True)
         self.app_table.sortItems(0, Qt.SortOrder.AscendingOrder)
         self._filter_applications(self.app_search.text())
@@ -649,14 +665,22 @@ class MainWindow(MSFluentWindow):
             name_item.setCheckState(Qt.CheckState.Unchecked)
             name_item.setToolTip(application.name)
             name_item.setData(Qt.ItemDataRole.UserRole, (application, directory))
+            link_target = directory_link_target(directory.path)
+            if link_target is not None:
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             type_item = QTableWidgetItem(language.lang(f"directory_role_{directory.role}"))
             drive_item = QTableWidgetItem(directory.path.drive.upper())
             drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             size_item = SizeTableWidgetItem(directory.size_bytes)
+            status_item = QTableWidgetItem(
+                language.lang("status_migrated" if link_target else "status_available")
+            )
+            status_item.setIcon((FluentIcon.LINK if link_target else FluentIcon.ACCEPT).icon())
             self.data_table.setItem(row, 0, name_item)
             self.data_table.setItem(row, 1, type_item)
             self.data_table.setItem(row, 2, drive_item)
             self.data_table.setItem(row, 3, size_item)
+            self.data_table.setItem(row, 4, status_item)
         self.data_table.setSortingEnabled(True)
         self.data_table.sortItems(0, Qt.SortOrder.AscendingOrder)
         self._filter_data_directories(self.data_search.text())
@@ -726,6 +750,10 @@ class MainWindow(MSFluentWindow):
         self.detail_icon.setPixmap(icon.pixmap(42, 42))
         self.detail_name.setText(application.name)
         self.detail_values["source"].setText(str(application.source_path))
+        link_target = directory_link_target(application.source_path)
+        self.detail_values["link_target"].setText(
+            str(link_target) if link_target else language.lang("detail_empty")
+        )
         self.detail_values["size"].setText(
             _format_size(application.primary_size_bytes)
             if application.primary_size_bytes is not None
@@ -782,6 +810,10 @@ class MainWindow(MSFluentWindow):
         self.data_detail_name.setText(application.name)
         self.data_detail_values["type"].setText(language.lang(f"directory_role_{directory.role}"))
         self.data_detail_values["source"].setText(str(directory.path))
+        link_target = directory_link_target(directory.path)
+        self.data_detail_values["link_target"].setText(
+            str(link_target) if link_target else language.lang("detail_empty")
+        )
         self.data_detail_values["size"].setText(
             _format_size(directory.size_bytes)
             if directory.size_bytes is not None
@@ -815,7 +847,9 @@ class MainWindow(MSFluentWindow):
 
     def _select_all(self) -> None:
         for row in range(self.app_table.rowCount()):
-            self.app_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+            item = self.app_table.item(row, 0)
+            if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                item.setCheckState(Qt.CheckState.Checked)
 
     def _clear_selection(self) -> None:
         for row in range(self.app_table.rowCount()):
@@ -824,7 +858,9 @@ class MainWindow(MSFluentWindow):
     def _select_all_data(self) -> None:
         for row in range(self.data_table.rowCount()):
             if not self.data_table.isRowHidden(row):
-                self.data_table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+                item = self.data_table.item(row, 0)
+                if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                    item.setCheckState(Qt.CheckState.Checked)
 
     def _clear_data_selection(self) -> None:
         for row in range(self.data_table.rowCount()):

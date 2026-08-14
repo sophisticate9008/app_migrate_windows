@@ -74,3 +74,12 @@ def is_relative_to(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def directory_link_target(path: Path) -> Path | None:
+    if not (path.is_junction() or path.is_symlink() or os.path.islink(path)):
+        return None
+    try:
+        return path.resolve(strict=False)
+    except (OSError, RuntimeError):
+        return None

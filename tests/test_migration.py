@@ -23,7 +23,12 @@ from app_migrate.models import (
     InstalledApplication,
     MigrationRequest,
 )
-from app_migrate.path_utils import extract_file_path, normalize_path, safe_component
+from app_migrate.path_utils import (
+    directory_link_target,
+    extract_file_path,
+    normalize_path,
+    safe_component,
+)
 from app_migrate.process_scanner import find_running_application_processes
 
 
@@ -49,6 +54,7 @@ class PathUtilTests(unittest.TestCase):
             _create_junction(link, target)
             try:
                 self.assertEqual(normalize_path(str(link)), link.absolute())
+                self.assertEqual(directory_link_target(link), target.resolve())
             finally:
                 link.rmdir()
 
