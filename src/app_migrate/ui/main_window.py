@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -21,13 +22,13 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     FluentIcon,
+    IndeterminateProgressRing,
     InfoBar,
     InfoBarPosition,
     LineEdit,
     MessageBox,
     MSFluentWindow,
     PrimaryPushButton,
-    ProgressBar,
     PushButton,
     SearchLineEdit,
     SimpleCardWidget,
@@ -48,6 +49,7 @@ from app_migrate.models import (
     MigrationRequest,
     MigrationResult,
 )
+from app_migrate.process_scanner import find_running_application_processes
 from app_migrate.registry_scanner import scan_installed_applications
 from app_migrate.resources import resource_path
 from app_migrate.workers import FunctionWorker
@@ -239,8 +241,7 @@ class MainWindow(MSFluentWindow):
 
         action_layout = QHBoxLayout()
         self.app_status = CaptionLabel(language.lang("status_ready"))
-        self.app_progress = ProgressBar()
-        self.app_progress.setFixedWidth(150)
+        self.app_progress = self._progress_ring()
         self.app_progress.hide()
         action_layout.addWidget(self.app_status)
         action_layout.addWidget(self.app_progress)
@@ -346,8 +347,7 @@ class MainWindow(MSFluentWindow):
 
         action_layout = QHBoxLayout()
         self.data_status = CaptionLabel(language.lang("status_ready"))
-        self.data_progress = ProgressBar()
-        self.data_progress.setFixedWidth(150)
+        self.data_progress = self._progress_ring()
         self.data_progress.hide()
         action_layout.addWidget(self.data_status)
         action_layout.addWidget(self.data_progress)
@@ -479,8 +479,7 @@ class MainWindow(MSFluentWindow):
 
         action_layout = QHBoxLayout()
         self.custom_status = CaptionLabel(language.lang("status_ready"))
-        self.custom_progress = ProgressBar()
-        self.custom_progress.setFixedWidth(150)
+        self.custom_progress = self._progress_ring()
         self.custom_progress.hide()
         action_layout.addWidget(self.custom_status)
         action_layout.addWidget(self.custom_progress)
@@ -504,6 +503,12 @@ class MainWindow(MSFluentWindow):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(callback)  # type: ignore[arg-type]
         return button
+
+    def _progress_ring(self) -> IndeterminateProgressRing:
+        progress = IndeterminateProgressRing(start=False)
+        progress.setFixedSize(28, 28)
+        progress.setStrokeWidth(3)
+        return progress
 
     def _path_field(
         self, label_key: str, dialog_key: str, callback: object
@@ -839,6 +844,8 @@ class MainWindow(MSFluentWindow):
             self._notify_warning(language.lang("missing_destination"))
             return
         requests = [program_migration_request(application, destination) for application in selected]
+        if not self._ensure_applications_closed(selected):
+            return
         if not self._confirm(len(requests)):
             return
         self._remember_path("paths/application_destination", str(destination))
@@ -861,6 +868,14 @@ class MainWindow(MSFluentWindow):
             data_migration_request(application, directory, destination)
             for application, directory in selected
         ]
+        applications = list(
+            {
+                application.registry_path or str(application.source_path): application
+                for application, _directory in selected
+            }.values()
+        )
+        if not self._ensure_applications_closed(applications):
+            return
         if not self._confirm(len(requests)):
             return
         self._remember_path("paths/data_destination", str(destination))
@@ -890,6 +905,31 @@ class MainWindow(MSFluentWindow):
         dialog.yesButton.setText(language.lang("continue_action"))
         dialog.cancelButton.setText(language.lang("cancel_action"))
         return bool(dialog.exec())
+
+    def _ensure_applications_closed(
+        self,
+        applications: list[InstalledApplication],
+    ) -> bool:
+        while True:
+            running = find_running_application_processes(applications)
+            if not running:
+                return True
+            process_counts = Counter(process.name for process in running)
+            process_lines = "\n".join(
+                language.lang("running_process_item", name=name, count=count)
+                for name, count in sorted(
+                    process_counts.items(), key=lambda item: item[0].casefold()
+                )
+            )
+            dialog = MessageBox(
+                language.lang("running_apps_title"),
+                language.lang("running_apps_message", processes=process_lines),
+                self,
+            )
+            dialog.yesButton.setText(language.lang("recheck_processes"))
+            dialog.cancelButton.setText(language.lang("cancel_action"))
+            if not dialog.exec():
+                return False
 
     def _start_migration(self, requests: list[MigrationRequest]) -> None:
         self._set_busy(True, "status_calculating")
@@ -978,9 +1018,13 @@ class MainWindow(MSFluentWindow):
         self.app_migrate_button.setEnabled(not busy)
         self.data_migrate_button.setEnabled(not busy)
         self.custom_migrate_button.setEnabled(not busy)
-        for progress_bar in (self.app_progress, self.data_progress, self.custom_progress):
-            progress_bar.setRange(0, 0 if busy else 100)
-            progress_bar.setVisible(busy)
+        for progress_ring in (self.app_progress, self.data_progress, self.custom_progress):
+            if busy:
+                progress_ring.start()
+                progress_ring.show()
+            else:
+                progress_ring.stop()
+                progress_ring.hide()
         self._set_status(language.lang(status_key))
 
     def _start_worker(self, worker: FunctionWorker) -> None:

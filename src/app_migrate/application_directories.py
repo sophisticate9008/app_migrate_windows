@@ -8,15 +8,20 @@ from app_migrate.models import ApplicationDirectory, InstalledApplication, Migra
 from app_migrate.path_utils import safe_component
 
 _GENERIC_DIRECTORY_NAMES = {"application", "app", "bin", "current"}
+_VERSION_DIRECTORY_NAME = re.compile(r"(?i)^v?\d+(?:\.\d+){1,}$")
 _PUBLISHER_SUFFIXES = re.compile(
     r"(?i)\b(?:corporation|corp\.?|inc\.?|incorporated|llc|ltd\.?|limited|company|co\.?)\b"
 )
 
 
 def normalize_application_directory(path: Path) -> Path:
-    if path.name.casefold() in _GENERIC_DIRECTORY_NAMES and path.parent.parent != path.parent:
-        return path.parent
-    return path
+    normalized = path
+    while normalized.parent.parent != normalized.parent and (
+        normalized.name.casefold() in _GENERIC_DIRECTORY_NAMES
+        or _VERSION_DIRECTORY_NAME.fullmatch(normalized.name)
+    ):
+        normalized = normalized.parent
+    return normalized
 
 
 def _publisher_name(publisher: str) -> str:

@@ -27,6 +27,14 @@ class RegistryScannerTests(unittest.TestCase):
             Path(r"C:\Program Files\Google\Chrome"),
         )
 
+    def test_normalize_application_directory_removes_version_folder(self) -> None:
+        path = Path(r"D:\02.app\youku\9.2.73.1001")
+
+        self.assertEqual(
+            normalize_application_directory(path),
+            Path(r"D:\02.app\youku"),
+        )
+
     def test_discovers_matching_user_data_without_sibling_products(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

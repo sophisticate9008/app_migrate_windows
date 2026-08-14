@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from shutil import copytree
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app_migrate.application_directories import (
     application_migration_requests,
@@ -24,6 +24,7 @@ from app_migrate.models import (
     MigrationRequest,
 )
 from app_migrate.path_utils import extract_file_path, normalize_path, safe_component
+from app_migrate.process_scanner import find_running_application_processes
 
 
 class PathUtilTests(unittest.TestCase):
@@ -53,6 +54,26 @@ class PathUtilTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    def test_finds_running_process_inside_application_directory(self) -> None:
+        application = InstalledApplication(
+            name="Example",
+            source_path=Path(r"D:\Apps\Example"),
+        )
+        process = Mock()
+        process.info = {
+            "pid": 123,
+            "name": "example.exe",
+            "exe": r"D:\Apps\Example\example.exe",
+        }
+
+        with (
+            patch("app_migrate.process_scanner.psutil.process_iter", return_value=[process]),
+            patch("app_migrate.process_scanner.os.getpid", return_value=999),
+        ):
+            running = find_running_application_processes([application])
+
+        self.assertEqual([(item.pid, item.name) for item in running], [(123, "example.exe")])
+
     def test_application_directory_group_uses_separate_targets(self) -> None:
         application = InstalledApplication(
             name="Google Chrome",
