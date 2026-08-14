@@ -27,7 +27,6 @@ class DirectoryStats:
 class MigrationRequest:
     source: Path
     destination_base: Path
-    intermediate_directory: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -55,8 +55,7 @@ def validate_request(request: MigrationRequest) -> tuple[Path, Path]:
     if is_relative_to(destination_base, source):
         raise MigrationError("destination_inside_source")
 
-    intermediate = safe_component(request.intermediate_directory)
-    destination = destination_base / intermediate / safe_component(source.name)
+    destination = destination_base / safe_component(source.name)
     if destination.exists():
         raise MigrationError("destination_exists")
     return source, destination

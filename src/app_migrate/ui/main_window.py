@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QFileInfo, QSize, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QFileInfo, QSettings, QSize, Qt, QThreadPool, QTimer
 from PySide6.QtGui import QIcon, QTextOption
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -104,6 +104,7 @@ class MainWindow(MSFluentWindow):
         self.setMinimumSize(940, 620)
         self._thread_pool = QThreadPool(self)
         self._thread_pool.setMaxThreadCount(2)
+        self._settings = QSettings("AppMigrate", "AppMigrate")
         self._applications: list[InstalledApplication] = []
         self._icon_provider = QFileIconProvider()
         self._active_workers: set[FunctionWorker] = set()
@@ -154,14 +155,15 @@ class MainWindow(MSFluentWindow):
         right_panel = QWidget()
         right_panel.setMinimumWidth(520)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(6, 0, 0, 0)
         right_layout.setSpacing(12)
 
         self.app_table = TableWidget(right_panel)
-        self.app_table.setColumnCount(3)
+        self.app_table.setColumnCount(4)
         self.app_table.setHorizontalHeaderLabels(
             [
                 language.lang("application"),
+                language.lang("application_drive"),
                 language.lang("application_size"),
                 language.lang("install_date"),
             ]
@@ -180,29 +182,31 @@ class MainWindow(MSFluentWindow):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-        self.app_table.setColumnWidth(1, 90)
-        self.app_table.setColumnWidth(2, 112)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self.app_table.setColumnWidth(1, 70)
+        self.app_table.setColumnWidth(2, 90)
+        self.app_table.setColumnWidth(3, 112)
         self.app_table.setMinimumWidth(520)
-        self.app_table.currentCellChanged.connect(self._show_application_details)
+        self.app_table.itemSelectionChanged.connect(self._show_current_application_details)
+        self.app_table.model().layoutChanged.connect(
+            lambda: QTimer.singleShot(0, self._select_first_application)
+        )
         right_layout.addWidget(self.app_table, 1)
         content_splitter.addWidget(right_panel)
         content_splitter.setStretchFactor(0, 0)
         content_splitter.setStretchFactor(1, 1)
         content_splitter.setSizes([250, 760])
 
-        destination_layout, self.app_destination, app_browse = self._path_field(
+        destination_layout, self.app_destination, _ = self._path_field(
             "destination_base", "choose_destination", self._browse_app_destination
         )
+        self.app_destination.setText(self._restore_path("paths/application_destination"))
+        self.app_destination.editingFinished.connect(
+            lambda: self._remember_path(
+                "paths/application_destination", self.app_destination.text()
+            )
+        )
         right_layout.addLayout(destination_layout)
-        intermediate_layout = QHBoxLayout()
-        intermediate_label = QLabel(language.lang("intermediate_directory"))
-        intermediate_label.setFixedWidth(120)
-        self.app_intermediate = LineEdit()
-        self.app_intermediate.setText(language.lang("default_intermediate"))
-        intermediate_layout.addWidget(intermediate_label)
-        intermediate_layout.addWidget(self.app_intermediate, 1)
-        intermediate_layout.addSpacing(app_browse.sizeHint().width())
-        right_layout.addLayout(intermediate_layout)
 
         action_layout = QHBoxLayout()
         self.app_status = CaptionLabel(language.lang("status_ready"))
@@ -277,20 +281,15 @@ class MainWindow(MSFluentWindow):
         source_layout, self.custom_source, _ = self._path_field(
             "custom_source", "choose_source", self._browse_custom_source
         )
-        destination_layout, self.custom_destination, browse = self._path_field(
+        destination_layout, self.custom_destination, _ = self._path_field(
             "destination_base", "choose_destination", self._browse_custom_destination
+        )
+        self.custom_destination.setText(self._restore_path("paths/custom_destination"))
+        self.custom_destination.editingFinished.connect(
+            lambda: self._remember_path("paths/custom_destination", self.custom_destination.text())
         )
         section_layout.addLayout(source_layout)
         section_layout.addLayout(destination_layout)
-        intermediate_layout = QHBoxLayout()
-        label = QLabel(language.lang("intermediate_directory"))
-        label.setFixedWidth(120)
-        self.custom_intermediate = LineEdit()
-        self.custom_intermediate.setText(language.lang("default_intermediate"))
-        intermediate_layout.addWidget(label)
-        intermediate_layout.addWidget(self.custom_intermediate, 1)
-        intermediate_layout.addSpacing(browse.sizeHint().width())
-        section_layout.addLayout(intermediate_layout)
         layout.addWidget(section)
         layout.addStretch(1)
 
@@ -336,20 +335,37 @@ class MainWindow(MSFluentWindow):
         layout.addWidget(browse)
         return layout, line_edit, browse
 
-    def _choose_directory(self, title_key: str, target: LineEdit) -> None:
+    def _choose_directory(
+        self, title_key: str, target: LineEdit, setting_key: str | None = None
+    ) -> None:
         initial = target.text() or str(Path.home())
         path = QFileDialog.getExistingDirectory(self, language.lang(title_key), initial)
         if path:
             target.setText(path)
+            if setting_key:
+                self._remember_path(setting_key, path)
+
+    def _restore_path(self, setting_key: str) -> str:
+        return str(self._settings.value(setting_key, ""))
+
+    def _remember_path(self, setting_key: str, path: str) -> None:
+        normalized = path.strip()
+        if normalized:
+            self._settings.setValue(setting_key, normalized)
+            self._settings.sync()
 
     def _browse_app_destination(self) -> None:
-        self._choose_directory("choose_destination", self.app_destination)
+        self._choose_directory(
+            "choose_destination", self.app_destination, "paths/application_destination"
+        )
 
     def _browse_custom_source(self) -> None:
         self._choose_directory("choose_source", self.custom_source)
 
     def _browse_custom_destination(self) -> None:
-        self._choose_directory("choose_destination", self.custom_destination)
+        self._choose_directory(
+            "choose_destination", self.custom_destination, "paths/custom_destination"
+        )
 
     def _scan_registry(self) -> None:
         self._set_busy(True, "status_scanning")
@@ -376,10 +392,13 @@ class MainWindow(MSFluentWindow):
             name_item.setToolTip(application.name)
             name_item.setData(Qt.ItemDataRole.UserRole, application)
             self.app_table.setItem(row, 0, name_item)
+            drive_item = QTableWidgetItem(application.source_path.drive.upper())
+            drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             size_item = SizeTableWidgetItem(application.size_bytes)
             install_date_item = DateTableWidgetItem(application.install_date)
-            self.app_table.setItem(row, 1, size_item)
-            self.app_table.setItem(row, 2, install_date_item)
+            self.app_table.setItem(row, 1, drive_item)
+            self.app_table.setItem(row, 2, size_item)
+            self.app_table.setItem(row, 3, install_date_item)
         self.app_table.setSortingEnabled(True)
         self.app_table.sortItems(0, Qt.SortOrder.AscendingOrder)
         if self._applications:
@@ -428,6 +447,17 @@ class MainWindow(MSFluentWindow):
         )
         self.detail_values["registry"].setText(application.registry_path)
 
+    def _show_current_application_details(self) -> None:
+        self._show_application_details(self.app_table.currentRow(), 0, -1, -1)
+
+    def _select_first_application(self) -> None:
+        if self.app_table.rowCount() == 0:
+            self._clear_application_details()
+            return
+        self.app_table.setCurrentCell(0, 0)
+        self.app_table.selectRow(0)
+        self._show_current_application_details()
+
     def _clear_application_details(self) -> None:
         self.detail_icon.clear()
         self.detail_name.setText(language.lang("detail_select_prompt"))
@@ -457,9 +487,9 @@ class MainWindow(MSFluentWindow):
             return
         if not self._confirm(len(selected)):
             return
+        self._remember_path("paths/application_destination", str(destination))
         requests = [
-            MigrationRequest(application.source_path, destination, self.app_intermediate.text())
-            for application in selected
+            MigrationRequest(application.source_path, destination) for application in selected
         ]
         self._start_migration(requests)
 
@@ -474,7 +504,8 @@ class MainWindow(MSFluentWindow):
             return
         if not self._confirm(1):
             return
-        request = MigrationRequest(source, destination, self.custom_intermediate.text())
+        self._remember_path("paths/custom_destination", str(destination))
+        request = MigrationRequest(source, destination)
         self._start_migration([request])
 
     def _confirm(self, count: int) -> bool:

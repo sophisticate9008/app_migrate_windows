@@ -41,7 +41,7 @@ class MigrationTests(unittest.TestCase):
             destination.mkdir()
 
             with self.assertRaisesRegex(MigrationError, "destination_same_drive"):
-                validate_request(MigrationRequest(source, destination, "AppMigrate"))
+                validate_request(MigrationRequest(source, destination))
 
     def test_junction_is_created_and_excluded_from_stats(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -70,7 +70,7 @@ class MigrationTests(unittest.TestCase):
             _create_junction(link, target)
             try:
                 with self.assertRaisesRegex(MigrationError, "source_is_link"):
-                    validate_request(MigrationRequest(link, destination, "AppMigrate"))
+                    validate_request(MigrationRequest(link, destination))
             finally:
                 link.rmdir()
 
@@ -81,7 +81,7 @@ class MigrationTests(unittest.TestCase):
             destination = root / "destination" / "source"
             source.mkdir()
             (source / "payload.txt").write_text("payload", encoding="utf-8")
-            request = MigrationRequest(source, root, "ignored")
+            request = MigrationRequest(source, root)
 
             with (
                 patch(
