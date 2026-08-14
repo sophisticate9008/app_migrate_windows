@@ -29,6 +29,7 @@ from qfluentwidgets import (
     PrimaryPushButton,
     ProgressBar,
     PushButton,
+    SearchLineEdit,
     SimpleCardWidget,
     SubtitleLabel,
     TableWidget,
@@ -134,7 +135,24 @@ class MainWindow(MSFluentWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(30, 26, 30, 24)
         layout.setSpacing(18)
-        layout.addLayout(self._page_header("tab_applications", "applications_description"))
+
+        header = QVBoxLayout()
+        header.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(16)
+        title_row.addWidget(SubtitleLabel(language.lang("tab_applications")))
+        self.app_search = SearchLineEdit()
+        self.app_search.setPlaceholderText(language.lang("search_applications"))
+        self.app_search.setClearButtonEnabled(True)
+        self.app_search.setFixedWidth(280)
+        self.app_search.textChanged.connect(self._filter_applications)
+        title_row.addWidget(self.app_search)
+        title_row.addStretch(1)
+        header.addLayout(title_row)
+        description = BodyLabel(language.lang("applications_description"))
+        description.setWordWrap(True)
+        header.addWidget(description)
+        layout.addLayout(header)
 
         toolbar = QHBoxLayout()
         self.scan_button = self._button("scan_registry", FluentIcon.SYNC, self._scan_registry)
@@ -401,11 +419,40 @@ class MainWindow(MSFluentWindow):
             self.app_table.setItem(row, 3, install_date_item)
         self.app_table.setSortingEnabled(True)
         self.app_table.sortItems(0, Qt.SortOrder.AscendingOrder)
-        if self._applications:
-            self.app_table.setCurrentCell(0, 0)
-        else:
+        self._filter_applications(self.app_search.text())
+
+    def _filter_applications(self, search_text: str) -> None:
+        query = search_text.strip().casefold()
+        visible_count = 0
+        first_visible_row = -1
+        for row in range(self.app_table.rowCount()):
+            name_item = self.app_table.item(row, 0)
+            is_visible = not query or query in name_item.text().casefold()
+            self.app_table.setRowHidden(row, not is_visible)
+            if is_visible:
+                visible_count += 1
+                if first_visible_row < 0:
+                    first_visible_row = row
+
+        current_row = self.app_table.currentRow()
+        if first_visible_row < 0:
+            self.app_table.clearSelection()
             self._clear_application_details()
-        self._set_status(language.lang("status_found", count=len(self._applications)))
+        elif current_row < 0 or self.app_table.isRowHidden(current_row):
+            self.app_table.setCurrentCell(first_visible_row, 0)
+            self.app_table.selectRow(first_visible_row)
+            self._show_current_application_details()
+
+        if query:
+            self._set_status(
+                language.lang(
+                    "status_filtered",
+                    visible=visible_count,
+                    total=self.app_table.rowCount(),
+                )
+            )
+        else:
+            self._set_status(language.lang("status_found", count=self.app_table.rowCount()))
 
     def _application_icon(self, application: InstalledApplication) -> QIcon:
         if application.icon_path:
@@ -451,11 +498,19 @@ class MainWindow(MSFluentWindow):
         self._show_application_details(self.app_table.currentRow(), 0, -1, -1)
 
     def _select_first_application(self) -> None:
-        if self.app_table.rowCount() == 0:
+        first_visible_row = next(
+            (
+                row
+                for row in range(self.app_table.rowCount())
+                if not self.app_table.isRowHidden(row)
+            ),
+            -1,
+        )
+        if first_visible_row < 0:
             self._clear_application_details()
             return
-        self.app_table.setCurrentCell(0, 0)
-        self.app_table.selectRow(0)
+        self.app_table.setCurrentCell(first_visible_row, 0)
+        self.app_table.selectRow(first_visible_row)
         self._show_current_application_details()
 
     def _clear_application_details(self) -> None:
