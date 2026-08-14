@@ -13,7 +13,7 @@ def normalize_path(value: str) -> Path | None:
     if not value:
         return None
     try:
-        path = Path(value).resolve(strict=False)
+        path = Path(os.path.abspath(value))
     except (OSError, RuntimeError):
         return None
     return path if path.is_absolute() else None

@@ -36,6 +36,7 @@ from qfluentwidgets import (
     TextEdit,
 )
 
+from app_migrate.application_directories import application_migration_requests
 from app_migrate.language import language
 from app_migrate.migration import migrate_directory
 from app_migrate.models import InstalledApplication, MigrationRequest, MigrationResult
@@ -260,7 +261,7 @@ class MainWindow(MSFluentWindow):
 
         self.detail_values: dict[str, BodyLabel | TextEdit] = {}
         for label_key, value_key, text_height in (
-            ("source_directory", "source", 52),
+            ("related_directories", "source", 116),
             ("application_size", "size", 0),
             ("install_date", "install_date", 0),
             ("version", "version", 0),
@@ -410,7 +411,8 @@ class MainWindow(MSFluentWindow):
             name_item.setToolTip(application.name)
             name_item.setData(Qt.ItemDataRole.UserRole, application)
             self.app_table.setItem(row, 0, name_item)
-            drive_item = QTableWidgetItem(application.source_path.drive.upper())
+            drives = sorted({directory.path.drive.upper() for directory in application.directories})
+            drive_item = QTableWidgetItem(" / ".join(drives))
             drive_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             size_item = SizeTableWidgetItem(application.size_bytes)
             install_date_item = DateTableWidgetItem(application.install_date)
@@ -481,7 +483,11 @@ class MainWindow(MSFluentWindow):
         icon = self._application_icon(application)
         self.detail_icon.setPixmap(icon.pixmap(42, 42))
         self.detail_name.setText(application.name)
-        self.detail_values["source"].setText(str(application.source_path))
+        directory_lines = [
+            f"{language.lang(f'directory_role_{directory.role}')}\n{directory.path}"
+            for directory in application.directories
+        ]
+        self.detail_values["source"].setText("\n\n".join(directory_lines))
         self.detail_values["size"].setText(
             _format_size(application.size_bytes)
             if application.size_bytes is not None
@@ -540,12 +546,14 @@ class MainWindow(MSFluentWindow):
         if not destination.is_dir():
             self._notify_warning(language.lang("missing_destination"))
             return
-        if not self._confirm(len(selected)):
+        requests = [
+            request
+            for application in selected
+            for request in application_migration_requests(application, destination)
+        ]
+        if not self._confirm(len(requests)):
             return
         self._remember_path("paths/application_destination", str(destination))
-        requests = [
-            MigrationRequest(application.source_path, destination) for application in selected
-        ]
         self._start_migration(requests)
 
     def _migrate_custom(self) -> None:

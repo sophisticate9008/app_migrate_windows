@@ -6,6 +6,7 @@ from pathlib import Path
 from shutil import copytree
 from unittest.mock import patch
 
+from app_migrate.application_directories import application_migration_requests
 from app_migrate.migration import (
     MigrationError,
     _create_junction,
@@ -13,8 +14,13 @@ from app_migrate.migration import (
     migrate_directory,
     validate_request,
 )
-from app_migrate.models import DirectoryStats, MigrationRequest
-from app_migrate.path_utils import extract_file_path, safe_component
+from app_migrate.models import (
+    ApplicationDirectory,
+    DirectoryStats,
+    InstalledApplication,
+    MigrationRequest,
+)
+from app_migrate.path_utils import extract_file_path, normalize_path, safe_component
 
 
 class PathUtilTests(unittest.TestCase):
@@ -28,10 +34,42 @@ class PathUtilTests(unittest.TestCase):
 
             extracted = extract_file_path(f'"{icon_path}",0')
 
-            self.assertEqual(extracted, icon_path.resolve())
+            self.assertEqual(extracted, icon_path.absolute())
+
+    def test_normalize_path_preserves_junction_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target"
+            target.mkdir()
+            link = root / "link"
+            _create_junction(link, target)
+            try:
+                self.assertEqual(normalize_path(str(link)), link.absolute())
+            finally:
+                link.rmdir()
 
 
 class MigrationTests(unittest.TestCase):
+    def test_application_directory_group_uses_separate_targets(self) -> None:
+        application = InstalledApplication(
+            name="Google Chrome",
+            source_path=Path(r"C:\Program Files\Google\Chrome"),
+            storage_name="Chrome",
+            related_directories=(
+                ApplicationDirectory(
+                    path=Path(r"C:\Users\Tester\AppData\Local\Google\Chrome"),
+                    role="user_data",
+                    destination_name="UserData",
+                ),
+            ),
+        )
+
+        requests = application_migration_requests(application, Path(r"D:\02.app"))
+
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0].destination_relative, Path(r"Chrome\Application"))
+        self.assertEqual(requests[1].destination_relative, Path(r"Chrome\UserData"))
+
     def test_validate_rejects_destination_on_same_drive(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

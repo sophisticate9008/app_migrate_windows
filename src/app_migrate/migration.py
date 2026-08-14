@@ -55,7 +55,15 @@ def validate_request(request: MigrationRequest) -> tuple[Path, Path]:
     if is_relative_to(destination_base, source):
         raise MigrationError("destination_inside_source")
 
-    destination = destination_base / safe_component(source.name)
+    if request.destination_relative is None:
+        destination = destination_base / safe_component(source.name)
+    else:
+        relative = request.destination_relative
+        if relative.is_absolute() or ".." in relative.parts:
+            raise MigrationError("destination_relative_invalid")
+        destination = (destination_base / relative).resolve(strict=False)
+        if not is_relative_to(destination, destination_base):
+            raise MigrationError("destination_relative_invalid")
     if destination.exists():
         raise MigrationError("destination_exists")
     return source, destination
