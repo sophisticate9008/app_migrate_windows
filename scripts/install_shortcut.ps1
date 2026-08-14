@@ -7,12 +7,13 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$targetPath = Join-Path $projectRoot ".venv\Scripts\app-migrate.exe"
+$launcherPath = Join-Path $projectRoot "启动应用迁移工具.vbs"
+$targetPath = Join-Path $env:SYSTEMROOT "System32\wscript.exe"
 $iconPath = Join-Path $projectRoot "src\app_migrate\resources\icons\app-migrate.ico"
 $shortcutPath = Join-Path $ShortcutDirectory "$ShortcutName.lnk"
 
-if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
-    throw "Application launcher not found. Run 'uv sync' in the project first."
+if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+    throw "Portable application launcher not found: $launcherPath"
 }
 
 if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
@@ -26,6 +27,7 @@ if (-not (Test-Path -LiteralPath $ShortcutDirectory -PathType Container)) {
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $targetPath
+$shortcut.Arguments = "`"$launcherPath`""
 $shortcut.WorkingDirectory = $projectRoot
 $shortcut.IconLocation = "$iconPath,0"
 $shortcut.Description = "Move Windows application folders to another drive using NTFS junctions."
