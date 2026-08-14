@@ -17,6 +17,8 @@ uv sync
 uv run app-migrate
 ```
 
+首次配置完成后，可以运行 `scripts\install_shortcut.ps1` 创建无终端窗口的桌面快捷方式。快捷方式直接指向项目虚拟环境中的 GUI 启动器，后续更新代码不需要重新创建。
+
 界面使用 `PySide6-Fluent-Widgets`，支持 Windows 11 Mica、系统浅色/深色模式和系统强调色。该组件对非商业项目采用 GPLv3；商业分发前需要从组件作者处取得商业授权。
 
 ## 使用注意
