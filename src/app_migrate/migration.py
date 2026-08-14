@@ -79,7 +79,12 @@ def _run_robocopy(source: Path, destination: Path) -> None:
         "/NJS",
     ]
     process = subprocess.run(
-        command, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     if process.returncode >= 8:
         details = (process.stderr or process.stdout).strip()
@@ -110,6 +115,7 @@ def _create_junction(link: Path, target: Path) -> None:
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     if process.returncode != 0:
         raise MigrationError(f"junction_failed:{(process.stderr or process.stdout).strip()}")

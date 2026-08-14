@@ -1,4 +1,6 @@
+import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -6,6 +8,22 @@ from app_migrate.windows_admin import request_elevation
 
 
 class WindowsAdminTests(TestCase):
+    def test_request_elevation_relaunches_gui_entry_without_console(self) -> None:
+        with TemporaryDirectory() as temporary:
+            launcher = Path(temporary) / "app-migrate.exe"
+            launcher.touch()
+            with (
+                patch.object(sys, "argv", [str(launcher)]),
+                patch(
+                    "app_migrate.windows_admin._shell_execute_as_admin",
+                    return_value=33,
+                ) as shell_execute,
+            ):
+                result = request_elevation(working_directory=Path(temporary))
+
+        self.assertTrue(result)
+        shell_execute.assert_called_once_with(str(launcher.resolve()), "", temporary)
+
     def test_request_elevation_launches_module_with_runas(self) -> None:
         with patch(
             "app_migrate.windows_admin._shell_execute_as_admin",

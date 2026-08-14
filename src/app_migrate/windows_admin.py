@@ -40,11 +40,24 @@ def request_elevation(
     executable: str | None = None,
     working_directory: Path | None = None,
 ) -> bool:
-    python_executable = executable or sys.executable
     launch_directory = working_directory or Path.cwd()
-    parameters = subprocess.list2cmdline(["-m", "app_migrate"])
+    if executable:
+        launch_executable = executable
+        parameters = subprocess.list2cmdline(["-m", "app_migrate"])
+    else:
+        current_launcher = Path(sys.argv[0]).resolve(strict=False)
+        if current_launcher.suffix.casefold() == ".exe" and current_launcher.is_file():
+            launch_executable = str(current_launcher)
+            parameters = ""
+        else:
+            python_executable = Path(sys.executable)
+            pythonw_executable = python_executable.with_name("pythonw.exe")
+            launch_executable = str(
+                pythonw_executable if pythonw_executable.is_file() else python_executable
+            )
+            parameters = subprocess.list2cmdline(["-m", "app_migrate"])
     result = _shell_execute_as_admin(
-        python_executable,
+        launch_executable,
         parameters,
         str(launch_directory),
     )
