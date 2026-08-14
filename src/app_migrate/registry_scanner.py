@@ -5,7 +5,12 @@ import winreg
 from pathlib import Path
 
 from app_migrate.models import InstalledApplication
-from app_migrate.path_utils import extract_executable_path, is_dangerous_source, normalize_path
+from app_migrate.path_utils import (
+    extract_executable_path,
+    extract_file_path,
+    is_dangerous_source,
+    normalize_path,
+)
 
 _UNINSTALL_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
 
@@ -65,6 +70,7 @@ def scan_installed_applications() -> list[InstalledApplication]:
                             InstalledApplication(
                                 name=name,
                                 source_path=path,
+                                icon_path=extract_file_path(_query_string(subkey, "DisplayIcon")),
                                 publisher=_query_string(subkey, "Publisher"),
                                 version=_query_string(subkey, "DisplayVersion"),
                                 registry_path=f"{root_name}\\{_UNINSTALL_KEY}\\{subkey_name}",

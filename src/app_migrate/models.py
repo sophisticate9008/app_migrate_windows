@@ -8,6 +8,7 @@ from pathlib import Path
 class InstalledApplication:
     name: str
     source_path: Path
+    icon_path: Path | None = None
     publisher: str = ""
     version: str = ""
     registry_path: str = ""

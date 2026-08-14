@@ -25,6 +25,7 @@ default = true
 
 [dependency-groups]
 dev = [
+    "pillow>=12.3.0",
     "ruff>=0.16.3",
 ]
 

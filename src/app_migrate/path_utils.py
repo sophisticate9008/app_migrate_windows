@@ -33,6 +33,19 @@ def extract_executable_path(value: str) -> Path | None:
     return path.parent if path and path.suffix else path
 
 
+def extract_file_path(value: str) -> Path | None:
+    value = os.path.expandvars(value.strip())
+    if not value:
+        return None
+    if value.startswith('"'):
+        end = value.find('"', 1)
+        candidate = value[1:end] if end > 1 else value.strip('"')
+    else:
+        candidate = re.sub(r",\s*-?\d+\s*$", "", value).strip()
+    path = normalize_path(candidate)
+    return path if path and path.is_file() else None
+
+
 def safe_component(value: str) -> str:
     cleaned = _INVALID_COMPONENT.sub("_", value).strip().rstrip(".")
     return cleaned or "migrated"

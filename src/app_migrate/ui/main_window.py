@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import QFileInfo, QSize, Qt, QThreadPool
+from PySide6.QtGui import QIcon, QTextOption
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
+    QFileIconProvider,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QSplitter,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -25,14 +28,17 @@ from qfluentwidgets import (
     PrimaryPushButton,
     ProgressBar,
     PushButton,
+    SimpleCardWidget,
     SubtitleLabel,
     TableWidget,
+    TextEdit,
 )
 
 from app_migrate.language import language
 from app_migrate.migration import migrate_directory
 from app_migrate.models import InstalledApplication, MigrationRequest, MigrationResult
 from app_migrate.registry_scanner import scan_installed_applications
+from app_migrate.resources import resource_path
 from app_migrate.workers import FunctionWorker
 
 
@@ -63,10 +69,12 @@ class MainWindow(MSFluentWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(language.lang("app_name"))
+        self.setWindowIcon(QIcon(str(resource_path("icons/app-migrate.ico"))))
         self.resize(1180, 760)
         self.setMinimumSize(940, 620)
         self._thread_pool = QThreadPool.globalInstance()
         self._applications: list[InstalledApplication] = []
+        self._icon_provider = QFileIconProvider()
         self._active_workers: set[FunctionWorker] = set()
         self._build_ui()
 
@@ -107,7 +115,17 @@ class MainWindow(MSFluentWindow):
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
-        self.app_table = TableWidget(page)
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.addWidget(self._build_application_details())
+
+        right_panel = QWidget()
+        right_panel.setMinimumWidth(520)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        self.app_table = TableWidget(right_panel)
         self.app_table.setColumnCount(4)
         self.app_table.setHorizontalHeaderLabels(
             [
@@ -120,20 +138,33 @@ class MainWindow(MSFluentWindow):
         self.app_table.setAlternatingRowColors(True)
         self.app_table.setWordWrap(False)
         self.app_table.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.app_table.setIconSize(QSize(28, 28))
         self.app_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.app_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.app_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.app_table.verticalHeader().hide()
+        self.app_table.verticalHeader().setDefaultSectionSize(40)
         header = self.app_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setMinimumSectionSize(70)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.app_table, 1)
+        self.app_table.setColumnWidth(0, 165)
+        self.app_table.setColumnWidth(1, 105)
+        self.app_table.setColumnWidth(2, 82)
+        self.app_table.setMinimumWidth(520)
+        self.app_table.currentCellChanged.connect(self._show_application_details)
+        right_layout.addWidget(self.app_table, 1)
+        content_splitter.addWidget(right_panel)
+        content_splitter.setStretchFactor(0, 0)
+        content_splitter.setStretchFactor(1, 1)
+        content_splitter.setSizes([250, 760])
 
         destination_layout, self.app_destination, app_browse = self._path_field(
             "destination_base", "choose_destination", self._browse_app_destination
         )
-        layout.addLayout(destination_layout)
+        right_layout.addLayout(destination_layout)
         intermediate_layout = QHBoxLayout()
         intermediate_label = QLabel(language.lang("intermediate_directory"))
         intermediate_label.setFixedWidth(120)
@@ -142,7 +173,7 @@ class MainWindow(MSFluentWindow):
         intermediate_layout.addWidget(intermediate_label)
         intermediate_layout.addWidget(self.app_intermediate, 1)
         intermediate_layout.addSpacing(app_browse.sizeHint().width())
-        layout.addLayout(intermediate_layout)
+        right_layout.addLayout(intermediate_layout)
 
         action_layout = QHBoxLayout()
         self.app_status = CaptionLabel(language.lang("status_ready"))
@@ -156,8 +187,49 @@ class MainWindow(MSFluentWindow):
             "migrate_selected", FluentIcon.SEND, self._migrate_selected, accent=True
         )
         action_layout.addWidget(self.app_migrate_button)
-        layout.addLayout(action_layout)
+        right_layout.addLayout(action_layout)
+        layout.addWidget(content_splitter, 1)
         return page
+
+    def _build_application_details(self) -> QWidget:
+        panel = SimpleCardWidget()
+        panel.setMinimumWidth(220)
+        panel.setMaximumWidth(320)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 18, 18, 18)
+        panel_layout.setSpacing(7)
+
+        self.detail_icon = QLabel()
+        self.detail_icon.setFixedSize(52, 52)
+        self.detail_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.detail_name = SubtitleLabel(language.lang("detail_select_prompt"))
+        self.detail_name.setWordWrap(True)
+        panel_layout.addWidget(self.detail_icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        panel_layout.addWidget(self.detail_name)
+
+        self.detail_values: dict[str, BodyLabel | TextEdit] = {}
+        for label_key, value_key, text_height in (
+            ("source_directory", "source", 58),
+            ("version", "version", 0),
+            ("publisher", "publisher", 0),
+            ("registry_location", "registry", 88),
+        ):
+            panel_layout.addSpacing(4)
+            panel_layout.addWidget(CaptionLabel(language.lang(label_key)))
+            if text_height:
+                value_label = TextEdit()
+                value_label.setReadOnly(True)
+                value_label.setFixedHeight(text_height)
+                value_label.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+                value_label.setText(language.lang("detail_empty"))
+            else:
+                value_label = BodyLabel(language.lang("detail_empty"))
+                value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.detail_values[value_key] = value_label
+            panel_layout.addWidget(value_label)
+        panel_layout.addStretch(1)
+        return panel
 
     def _build_custom_page(self) -> QWidget:
         page = QWidget()
@@ -261,8 +333,9 @@ class MainWindow(MSFluentWindow):
         self.app_table.setRowCount(len(self._applications))
         for row, application in enumerate(self._applications):
             name_item = QTableWidgetItem(application.name)
+            name_item.setIcon(self._application_icon(application))
             name_item.setCheckState(Qt.CheckState.Unchecked)
-            name_item.setToolTip(application.registry_path)
+            name_item.setToolTip(application.name)
             self.app_table.setItem(row, 0, name_item)
             publisher_item = QTableWidgetItem(application.publisher)
             version_item = QTableWidgetItem(application.version)
@@ -271,7 +344,48 @@ class MainWindow(MSFluentWindow):
             self.app_table.setItem(row, 1, publisher_item)
             self.app_table.setItem(row, 2, version_item)
             self.app_table.setItem(row, 3, source_item)
+        if self._applications:
+            self.app_table.setCurrentCell(0, 0)
+        else:
+            self._clear_application_details()
         self._set_status(language.lang("status_found", count=len(self._applications)))
+
+    def _application_icon(self, application: InstalledApplication) -> QIcon:
+        if application.icon_path:
+            if application.icon_path.suffix.casefold() in {".exe", ".dll"}:
+                icon = self._icon_provider.icon(QFileInfo(str(application.icon_path)))
+            else:
+                icon = QIcon(str(application.icon_path))
+            if not icon.isNull():
+                return icon
+        return FluentIcon.APPLICATION.icon()
+
+    def _show_application_details(
+        self,
+        current_row: int,
+        _current_column: int,
+        _previous_row: int,
+        _previous_column: int,
+    ) -> None:
+        if current_row < 0 or current_row >= len(self._applications):
+            self._clear_application_details()
+            return
+        application = self._applications[current_row]
+        icon = self._application_icon(application)
+        self.detail_icon.setPixmap(icon.pixmap(48, 48))
+        self.detail_name.setText(application.name)
+        self.detail_values["source"].setText(str(application.source_path))
+        self.detail_values["version"].setText(application.version or language.lang("detail_empty"))
+        self.detail_values["publisher"].setText(
+            application.publisher or language.lang("detail_empty")
+        )
+        self.detail_values["registry"].setText(application.registry_path)
+
+    def _clear_application_details(self) -> None:
+        self.detail_icon.clear()
+        self.detail_name.setText(language.lang("detail_select_prompt"))
+        for value_label in self.detail_values.values():
+            value_label.setText(language.lang("detail_empty"))
 
     def _select_all(self) -> None:
         for row in range(self.app_table.rowCount()):

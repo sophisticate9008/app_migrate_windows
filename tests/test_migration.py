@@ -14,12 +14,21 @@ from app_migrate.migration import (
     validate_request,
 )
 from app_migrate.models import DirectoryStats, MigrationRequest
-from app_migrate.path_utils import safe_component
+from app_migrate.path_utils import extract_file_path, safe_component
 
 
 class PathUtilTests(unittest.TestCase):
     def test_safe_component_replaces_windows_invalid_characters(self) -> None:
         self.assertEqual(safe_component("bad:name/with*chars?"), "bad_name_with_chars_")
+
+    def test_extract_file_path_handles_quoted_display_icon_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            icon_path = Path(temporary) / "app icon.exe"
+            icon_path.touch()
+
+            extracted = extract_file_path(f'"{icon_path}",0')
+
+            self.assertEqual(extracted, icon_path.resolve())
 
 
 class MigrationTests(unittest.TestCase):
