@@ -13,6 +13,7 @@ from app_migrate.models import InstalledApplication
 class RunningProcess:
     pid: int
     name: str
+    executable: Path
 
 
 def _normalized_path(path: str | Path) -> str:
@@ -52,8 +53,47 @@ def find_running_application_processes(
             matches[pid] = RunningProcess(
                 pid=pid,
                 name=str(process.info.get("name") or Path(executable).name),
+                executable=Path(executable),
             )
         except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
             continue
 
     return sorted(matches.values(), key=lambda item: (item.name.casefold(), item.pid))
+
+
+def terminate_application_processes(
+    processes: list[RunningProcess],
+    timeout: float = 3.0,
+) -> list[RunningProcess]:
+    """Terminate matching processes and return those that could not be stopped."""
+    pending: dict[psutil.Process, RunningProcess] = {}
+    failed: dict[int, RunningProcess] = {}
+
+    for running in processes:
+        try:
+            process = psutil.Process(running.pid)
+            if _normalized_path(process.exe()) != _normalized_path(running.executable):
+                continue
+            process.terminate()
+            pending[process] = running
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            failed[running.pid] = running
+
+    _gone, alive = psutil.wait_procs(list(pending), timeout=timeout)
+    for process in alive:
+        running = pending[process]
+        try:
+            process.kill()
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            failed[running.pid] = running
+
+    _gone, alive = psutil.wait_procs(alive, timeout=timeout)
+    for process in alive:
+        running = pending[process]
+        failed[running.pid] = running
+
+    return sorted(failed.values(), key=lambda item: (item.name.casefold(), item.pid))

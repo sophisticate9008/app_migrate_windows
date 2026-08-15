@@ -31,7 +31,11 @@ from app_migrate.path_utils import (
     normalize_path,
     safe_component,
 )
-from app_migrate.process_scanner import find_running_application_processes
+from app_migrate.process_scanner import (
+    RunningProcess,
+    find_running_application_processes,
+    terminate_application_processes,
+)
 
 
 class PathUtilTests(unittest.TestCase):
@@ -98,7 +102,32 @@ class MigrationTests(unittest.TestCase):
         ):
             running = find_running_application_processes([application])
 
-        self.assertEqual([(item.pid, item.name) for item in running], [(123, "example.exe")])
+        self.assertEqual(
+            [(item.pid, item.name, item.executable) for item in running],
+            [(123, "example.exe", Path(r"D:\Apps\Example\example.exe"))],
+        )
+
+    def test_terminates_process_then_kills_survivor(self) -> None:
+        running = RunningProcess(
+            pid=123,
+            name="example.exe",
+            executable=Path(r"D:\Apps\Example\example.exe"),
+        )
+        process = Mock()
+        process.exe.return_value = str(running.executable)
+
+        with (
+            patch("app_migrate.process_scanner.psutil.Process", return_value=process),
+            patch(
+                "app_migrate.process_scanner.psutil.wait_procs",
+                side_effect=[([], [process]), ([process], [])],
+            ),
+        ):
+            failed = terminate_application_processes([running], timeout=0)
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertEqual(failed, [])
 
     def test_application_directory_group_uses_separate_targets(self) -> None:
         application = InstalledApplication(

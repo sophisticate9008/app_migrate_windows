@@ -50,7 +50,10 @@ from app_migrate.models import (
     MigrationResult,
 )
 from app_migrate.path_utils import directory_link_target
-from app_migrate.process_scanner import find_running_application_processes
+from app_migrate.process_scanner import (
+    find_running_application_processes,
+    terminate_application_processes,
+)
 from app_migrate.registry_scanner import scan_installed_applications
 from app_migrate.resources import resource_path
 from app_migrate.workers import FunctionWorker
@@ -974,10 +977,19 @@ class MainWindow(MSFluentWindow):
                 language.lang("running_apps_message", processes=process_lines),
                 self,
             )
-            dialog.yesButton.setText(language.lang("recheck_processes"))
+            dialog.yesButton.setText(language.lang("terminate_processes"))
             dialog.cancelButton.setText(language.lang("cancel_action"))
             if not dialog.exec():
                 return False
+            failed = terminate_application_processes(running)
+            if failed:
+                failed_lines = "\n".join(
+                    language.lang("running_process_with_pid", name=item.name, pid=item.pid)
+                    for item in failed
+                )
+                self._notify_warning(
+                    language.lang("terminate_processes_failed", processes=failed_lines)
+                )
 
     def _start_migration(self, requests: list[MigrationRequest]) -> None:
         self._set_busy(True, "status_calculating")
