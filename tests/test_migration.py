@@ -13,6 +13,8 @@ from app_migrate.application_directories import (
 from app_migrate.migration import (
     MigrationError,
     _create_junction,
+    _extended_length_path,
+    _remove_tree,
     directory_stats,
     migrate_directory,
     validate_request,
@@ -60,6 +62,24 @@ class PathUtilTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    def test_extended_length_path_supports_windows_long_paths(self) -> None:
+        path = Path(r"C:\data\folder")
+
+        self.assertEqual(str(_extended_length_path(path)), r"\\?\C:\data\folder")
+
+    def test_directory_stats_reads_files_beyond_max_path(self) -> None:
+        root = Path(tempfile.mkdtemp(dir=Path.cwd()))
+        try:
+            relative = Path(*(["nested_directory_name_" * 2] * 6), "payload.bin")
+            long_file = _extended_length_path(root / relative)
+            long_file.parent.mkdir(parents=True)
+            long_file.write_bytes(b"payload")
+            self.assertGreater(len(str(root / relative)), 260)
+
+            self.assertEqual(directory_stats(root), DirectoryStats(file_count=1, total_bytes=7))
+        finally:
+            _remove_tree(root, ignore_errors=True)
+
     def test_finds_running_process_inside_application_directory(self) -> None:
         application = InstalledApplication(
             name="Example",
@@ -114,7 +134,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(request.destination_relative, Path(r"11\22"))
 
     def test_validate_rejects_destination_on_same_drive(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
             root = Path(temporary)
             source = root / "source"
             destination = root / "destination"

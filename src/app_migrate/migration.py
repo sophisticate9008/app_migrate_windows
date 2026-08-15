@@ -19,10 +19,24 @@ class MigrationError(RuntimeError):
 ProgressCallback = Callable[[str], None]
 
 
+def _extended_length_path(path: Path) -> Path:
+    absolute = str(path.absolute())
+    if absolute.startswith("\\\\?\\"):
+        return Path(absolute)
+    if absolute.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{absolute[2:]}")
+    return Path(f"\\\\?\\{absolute}")
+
+
+def _remove_tree(path: Path, ignore_errors: bool = False) -> None:
+    shutil.rmtree(_extended_length_path(path), ignore_errors=ignore_errors)
+
+
 def directory_stats(path: Path) -> DirectoryStats:
     file_count = 0
     total_bytes = 0
-    for root, directory_names, file_names in os.walk(path, followlinks=False):
+    walk_root = _extended_length_path(path)
+    for root, directory_names, file_names in os.walk(walk_root, followlinks=False):
         directory_names[:] = [
             name
             for name in directory_names
@@ -171,10 +185,10 @@ def migrate_directory(
             raise
 
         notify("cleaning")
-        shutil.rmtree(backup)
+        _remove_tree(backup)
         notify("completed")
         return MigrationResult(source=source, destination=destination, stats=source_stats)
     except Exception:
         if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+            _remove_tree(staging, ignore_errors=True)
         raise
